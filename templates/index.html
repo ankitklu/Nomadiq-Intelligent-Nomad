@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nomadiq · Intelligent Nomad</title>
+    <meta name="description" content="Plan trips with flights, hotels and day-by-day itineraries in one conversation.">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23C2553A'/><path d='M16 6l3.5 10L16 26l-3.5-10z' fill='%23F7F3EC'/></svg>">
+    <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+</head>
+<body>
+    <header class="topbar">
+        <a class="brand" href="/" aria-label="Nomadiq home">
+            <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+                <circle cx="16" cy="16" r="14" />
+                <path d="M16 6l3.5 10L16 26l-3.5-10z" />
+            </svg>
+            <span>Nomadiq</span>
+        </a>
+
+        <div class="topbar-actions">
+            <button class="icon-btn" id="themeToggle" type="button" aria-label="Toggle dark mode">
+                <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+                <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+            </button>
+            <button class="btn-ghost" id="newTripBtn" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                New trip
+            </button>
+        </div>
+    </header>
+
+    <main class="main">
+        <!-- Empty state -->
+        <section class="hero" id="hero">
+            <p class="eyebrow">Your AI travel companion</p>
+            <h1>Where to <em>next?</em></h1>
+            <p class="lede">Tell me where you want to go. I'll find flights, pick hotels and plan each day, all within your budget.</p>
+        </section>
+
+        <!-- Conversation -->
+        <section class="thread" id="thread" aria-live="polite"></section>
+    </main>
+
+    <!-- Composer -->
+    <footer class="composer-wrap" id="composerWrap">
+        <form class="composer" id="composer">
+            <label for="prompt" class="sr-only">Describe your trip</label>
+            <textarea
+                id="prompt"
+                rows="1"
+                placeholder="Where, when, and your budget…"
+                autocomplete="off"
+            ></textarea>
+            <button type="submit" class="send-btn" id="sendBtn" aria-label="Plan trip" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </button>
+        </form>
+        <p class="composer-hint">Press <kbd>Enter</kbd> to send · <kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line</p>
+
+        <div class="suggestions" id="suggestions">
+                <button type="button" class="chip" data-prompt="Plan a 7-day Luxembourg trip from Delhi including flights, hotels and sightseeing under ₹10 lakhs">
+                    <span class="chip-emoji">🏰</span> 7 days in Luxembourg
+                </button>
+                <button type="button" class="chip" data-prompt="Plan a 5-day Bali honeymoon from Mumbai with beach resorts and day trips under ₹2.5 lakhs">
+                    <span class="chip-emoji">🌴</span> Bali honeymoon
+                </button>
+                <button type="button" class="chip" data-prompt="Plan a 6-day Japan trip from Bangalore in cherry blossom season, covering Tokyo and Kyoto">
+                    <span class="chip-emoji">🌸</span> Japan in spring
+                </button>
+                <button type="button" class="chip" data-prompt="Plan a 4-day budget backpacking trip to Nepal from Delhi with trekking options">
+                    <span class="chip-emoji">🏔️</span> Nepal on a budget
+                </button>
+        </div>
+    </footer>
+
+    <!-- Templates -->
+    <template id="userMsgTpl">
+        <div class="msg msg-user">
+            <div class="bubble"></div>
+        </div>
+    </template>
+
+    <template id="loadingTpl">
+        <div class="msg msg-agent">
+            <div class="card loading-card">
+                <div class="loading-head">
+                    <span class="pulse-dot"></span>
+                    <span class="loading-title">Planning your trip…</span>
+                </div>
+                <ol class="steps">
+                    <li data-step="0"><span class="step-icon">✈️</span> Searching flights</li>
+                    <li data-step="1"><span class="step-icon">🏨</span> Finding hotels</li>
+                    <li data-step="2"><span class="step-icon">🗺️</span> Building your itinerary</li>
+                    <li data-step="3"><span class="step-icon">✨</span> Putting it all together</li>
+                </ol>
+            </div>
+        </div>
+    </template>
+
+    <template id="resultTpl">
+        <div class="msg msg-agent">
+            <article class="card result-card">
+                <nav class="tabs" role="tablist">
+                    <button type="button" role="tab" class="tab is-active" data-tab="answer">Plan</button>
+                    <button type="button" role="tab" class="tab" data-tab="itinerary">Itinerary</button>
+                    <button type="button" role="tab" class="tab" data-tab="flights">Flights</button>
+                    <button type="button" role="tab" class="tab" data-tab="hotels">Hotels</button>
+                </nav>
+
+                <div class="panels">
+                    <div class="panel prose is-active" data-panel="answer"></div>
+                    <div class="panel prose" data-panel="itinerary"></div>
+                    <div class="panel raw" data-panel="flights"></div>
+                    <div class="panel raw" data-panel="hotels"></div>
+                </div>
+
+                <footer class="result-foot">
+                    <span class="meta"></span>
+                    <button type="button" class="btn-ghost btn-sm copy-btn">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+                        <span>Copy</span>
+                    </button>
+                </footer>
+            </article>
+        </div>
+    </template>
+
+    <template id="errorTpl">
+        <div class="msg msg-agent">
+            <div class="card error-card">
+                <strong>Couldn't plan that trip.</strong>
+                <p class="error-text"></p>
+                <button type="button" class="btn-ghost btn-sm retry-btn">Try again</button>
+            </div>
+        </div>
+    </template>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+    <script src="{{ url_for('static', path='script.js') }}"></script>
+</body>
+</html>

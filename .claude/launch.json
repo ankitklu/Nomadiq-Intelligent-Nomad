@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "nomadiq",
+      "runtimeExecutable": "/opt/homebrew/Caskroom/miniconda/base/envs/nomadiq/bin/python",
+      "runtimeArgs": ["-m", "uvicorn", "app:app", "--port", "8000"],
+      "port": 8000
+    }
+  ]
+}
