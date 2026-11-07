@@ -36,7 +36,7 @@ def get_database_url():
 
     if "sslmode" not in database_url:
         separator= "&" if "?" in database_url else "?"
-        database_url += f"{database_url}{separator}sslmode=require"
+        database_url += f"{separator}sslmode=require"
 
     return database_url
 
@@ -55,7 +55,7 @@ if not GROQ_API_KEY:
 
 llm = ChatGroq(
     api_key=GROQ_API_KEY,
-    model="llama-3.3-70b-versatile",
+    model="openai/gpt-oss-20b",
     temperature=0.7,
 )
 
@@ -157,3 +157,68 @@ def final_agent(state: TravelState):
         "llm_calls": state.get("llm_calls", 0) + 1
     }
 
+# ==========================
+# Build a graph
+# =========================
+
+graph = StateGraph(TravelState)
+
+graph.add_node("flight_agent", flight_agent)
+graph.add_node("hotel_agent", hotel_agent)
+graph.add_node("itinerary_agent", itinerary_agent)
+graph.add_node("final_agent", final_agent)
+
+graph.add_edge(START, "flight_agent")
+graph.add_edge("flight_agent", "hotel_agent")
+graph.add_edge("hotel_agent", "itinerary_agent")
+graph.add_edge("itinerary_agent", "final_agent")
+graph.add_edge("final_agent", END)
+
+# ==========================
+# Build a graph
+# =========================
+
+DATABASE_URL = get_database_url()
+
+_conn = psycopg.connect(DATABASE_URL, autocommit=True, row_factory=dict_row)
+checkpointer = PostgresSaver(_conn)
+checkpointer.setup()
+
+travel_graph = graph.compile(checkpointer=checkpointer)
+
+def run_travel_agent(user_input: str, thread_id: str | None = None):
+
+    if not thread_id:
+        thread_id = f"user_{uuid.uuid4().hex}"
+
+    config = {
+        "configurable":{
+            "thread_id": thread_id
+        }
+    }
+
+
+    result = travel_graph.invoke(
+        {
+            "messages":[
+                HumanMessage(content=user_input)
+            ],
+            "user_query": user_input,
+            "flight_results": "",
+            "hotel_results": "",
+            "itinerary": "",
+            "llm_calls": 0
+        },
+        config = config
+    )
+
+    final_answer = result["messages"][-1].content
+
+    return {
+        "thread_id": thread_id,
+        "answer": final_answer,
+        "flight_results": result.get("flight_results", ""),
+        "hotel_results": result.get("hotel_results", ""),
+        "itinerary": result.get("itinerary", ""),
+        "llm_calls": result.get("llm_calls", 0)
+    }
