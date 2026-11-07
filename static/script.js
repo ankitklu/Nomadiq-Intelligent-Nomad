@@ -143,7 +143,99 @@ function addLoading() {
     };
 }
 
-function addResult(data, elapsedMs) {
+// =========================
+// PDF export
+// =========================
+
+const HTML2PDF_SRC = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
+let html2pdfLoader = null;
+
+// Loaded on first use so the page itself stays light
+function loadHtml2Pdf() {
+    if (window.html2pdf) return Promise.resolve(window.html2pdf);
+
+    html2pdfLoader ??= new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = HTML2PDF_SRC;
+        script.onload = () => resolve(window.html2pdf);
+        script.onerror = () => {
+            html2pdfLoader = null;
+            reject(new Error("Couldn't load the PDF library."));
+        };
+        document.head.appendChild(script);
+    });
+
+    return html2pdfLoader;
+}
+
+function slugify(text) {
+    return text
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 50) || "trip";
+}
+
+function buildPdfDoc(query, answer) {
+    const doc = document.createElement("div");
+    doc.className = "pdf-doc";
+
+    const date = new Date().toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
+
+    doc.innerHTML = `
+        <header class="pdf-head">
+            <div class="pdf-brand">
+                <svg width="24" height="24" viewBox="0 0 32 32" aria-hidden="true">
+                    <circle cx="16" cy="16" r="14" fill="#C2553A" />
+                    <path d="M16 6l3.5 10L16 26l-3.5-10z" fill="#FFFFFF" />
+                </svg>
+                Nomadiq
+            </div>
+            <span class="pdf-date">${escapeHtml(date)}</span>
+        </header>
+        <p class="pdf-query"><strong>Your request</strong>${escapeHtml(query)}</p>
+        <div class="prose">${renderMarkdown(answer)}</div>
+    `;
+
+    return doc;
+}
+
+async function downloadPdf(query, answer) {
+    const html2pdf = await loadHtml2Pdf();
+
+    await html2pdf()
+        .set({
+            margin: [14, 14, 16, 14],
+            filename: `nomadiq-${slugify(query)}.pdf`,
+            image: { type: "jpeg", quality: 0.96 },
+            // scrollX/Y: without these, html2canvas renders blank pages when the window is scrolled
+            html2canvas: { scale: 2, useCORS: true, backgroundColor: "#FFFFFF", scrollX: 0, scrollY: 0 },
+            jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+            pagebreak: { mode: ["css", "legacy"], avoid: ["tr", "blockquote", "li", "h2", "h3"] },
+        })
+        .from(buildPdfDoc(query, answer))
+        .toPdf()
+        .get("pdf")
+        .then((pdf) => {
+            const pages = pdf.internal.getNumberOfPages();
+            const { width, height } = pdf.internal.pageSize;
+
+            for (let i = 1; i <= pages; i++) {
+                pdf.setPage(i);
+                pdf.setFontSize(8);
+                pdf.setTextColor(138, 144, 139);
+                pdf.text("Planned with Nomadiq", 14, height - 8);
+                pdf.text(`${i} / ${pages}`, width - 14, height - 8, { align: "right" });
+            }
+        })
+        .save();
+}
+
+// =========================
+// Results
+// =========================
+
+function addResult(data, elapsedMs, query) {
     const node = cloneTpl(els.resultTpl);
 
     const sections = {
@@ -187,6 +279,23 @@ function addResult(data, elapsedMs) {
             $("span", copyBtn).textContent = "Copy failed";
         }
         setTimeout(() => ($("span", copyBtn).textContent = "Copy"), 1600);
+    });
+
+    const pdfBtn = $(".pdf-btn", node);
+    const pdfLabel = $("span", pdfBtn);
+    pdfBtn.addEventListener("click", async () => {
+        pdfBtn.disabled = true;
+        pdfLabel.textContent = "Preparing…";
+        try {
+            await downloadPdf(query, data.answer || "");
+            pdfLabel.textContent = "Download PDF";
+        } catch (err) {
+            console.error(err);
+            pdfLabel.textContent = "PDF failed";
+            setTimeout(() => (pdfLabel.textContent = "Download PDF"), 2000);
+        } finally {
+            pdfBtn.disabled = false;
+        }
     });
 
     els.thread.appendChild(node);
@@ -247,7 +356,7 @@ async function send(text) {
 
         state.threadId = data.thread_id;
         loading.remove();
-        addResult(data, performance.now() - started);
+        addResult(data, performance.now() - started, message);
     } catch (err) {
         loading.remove();
         addError(err.message || "Something went wrong. Please try again.", message);
