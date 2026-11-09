@@ -169,3 +169,5 @@ FastAPI · LangGraph · LangChain · Groq · Tavily · Aviationstack · PostgreS
 ## License
 
 [MIT](LICENSE) © 2026 Ankit Kumar Mishra
+
+Live:- https://nomadiq-intelligent-nomad.onrender.com/
