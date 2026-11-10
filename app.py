@@ -1,5 +1,6 @@
 import uvicorn
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -10,14 +11,23 @@ from fastapi.templating import Jinja2Templates
 
 from pydantic import BaseModel
 
-from backend import run_travel_agent
+from backend import run_travel_agent, init_travel_agent, close_travel_agent
 
 BASE_DIR = Path(__file__).resolve().parent
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_travel_agent()
+    yield
+    await close_travel_agent()
+
 
 app = FastAPI(
     title="Nomadiq Intelligent Nomad",
     description="An intelligent travel planning assistant that helps users plan trips, find flights, hotels, and create itineraries.",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -37,20 +47,19 @@ class ChatRequest(BaseModel):
 
 
 @app.get("/", response_class=HTMLResponse)
-def home(request: Request):
+async def home(request: Request):
     return templates.TemplateResponse(request, "index.html")
 
 
-# Plain `def` so FastAPI runs the (blocking) agent graph in a worker thread
 @app.post("/api/chat")
-def chat(payload: ChatRequest):
+async def chat(payload: ChatRequest):
     message = payload.message.strip()
 
     if not message:
         return JSONResponse(status_code=400, content={"error": "Message cannot be empty."})
 
     try:
-        result = run_travel_agent(user_input=message, thread_id=payload.thread_id)
+        result = await run_travel_agent(user_input=message, thread_id=payload.thread_id)
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 

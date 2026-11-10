@@ -7,14 +7,15 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
 from typing import TypedDict, Annotated
+import asyncio
 import operator
 import uuid
 
-import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
 
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from langchain_core.messages import (
     HumanMessage,
@@ -75,9 +76,9 @@ class TravelState(TypedDict):
 # FLight Agent
 # =========================
 
-def flight_agent(state: TravelState):
+async def flight_agent(state: TravelState):
     query = state["user_query"]
-    flight_data = search_flights(query)
+    flight_data = await search_flights(query)
 
     return {
         "flight_results": flight_data,
@@ -91,9 +92,9 @@ def flight_agent(state: TravelState):
 # Hotel Agent
 # =========================
 
-def hotel_agent(state: TravelState):
+async def hotel_agent(state: TravelState):
     query = f"Best hotels for {state['user_query']}"
-    hotel_results = tavily_search(query)
+    hotel_results = await tavily_search(query)
 
     return {
         "hotel_results": hotel_results,
@@ -107,7 +108,7 @@ def hotel_agent(state: TravelState):
 # Itinerary Agent
 # =========================
 
-def itinerary_agent(state: TravelState):
+async def itinerary_agent(state: TravelState):
     itinerary_prompt = f"""
     Based on the following flight and hotel results, create a detailed travel itinerary for the user query '{state['user_query']}'.
 
@@ -118,7 +119,7 @@ def itinerary_agent(state: TravelState):
     {state['hotel_results']}
     """
 
-    response = llm.invoke([
+    response = await llm.ainvoke([
             SystemMessage(content="You are a expert travel planner."),
             HumanMessage(content=itinerary_prompt)
         ])
@@ -133,7 +134,7 @@ def itinerary_agent(state: TravelState):
 # Final Response Agent
 # =========================
 
-def final_agent(state: TravelState):
+async def final_agent(state: TravelState):
     final_response_prompt = f"""
     Based on the following flight and hotel results, and the generated itinerary, create a final response for the user query '{state['user_query']}'.
 
@@ -147,7 +148,7 @@ def final_agent(state: TravelState):
     {state['itinerary']}
     """
 
-    response = llm.invoke([
+    response = await llm.ainvoke([
             SystemMessage(content="You are a expert travel planner."),
             HumanMessage(content=final_response_prompt)
         ])
@@ -175,18 +176,58 @@ graph.add_edge("itinerary_agent", "final_agent")
 graph.add_edge("final_agent", END)
 
 # ==========================
-# Build a graph
+# Checkpointer / compiled graph
 # =========================
 
 DATABASE_URL = get_database_url()
 
-_conn = psycopg.connect(DATABASE_URL, autocommit=True, row_factory=dict_row)
-checkpointer = PostgresSaver(_conn)
-checkpointer.setup()
+# The async pool and checkpointer must be created inside a running event loop,
+# so they are set up by init_travel_agent() (called from the FastAPI lifespan)
+# rather than at import time.
+_pool: AsyncConnectionPool | None = None
+travel_graph = None
+_init_lock = asyncio.Lock()
 
-travel_graph = graph.compile(checkpointer=checkpointer)
 
-def run_travel_agent(user_input: str, thread_id: str | None = None):
+async def init_travel_agent():
+    global _pool, travel_graph
+
+    async with _init_lock:
+        if travel_graph is not None:
+            return
+
+        _pool = AsyncConnectionPool(
+            conninfo=DATABASE_URL,
+            max_size=10,
+            kwargs={
+                "autocommit": True,
+                "row_factory": dict_row,
+                "prepare_threshold": 0,
+            },
+            open=False,
+        )
+        await _pool.open()
+
+        checkpointer = AsyncPostgresSaver(_pool)
+        await checkpointer.setup()
+
+        travel_graph = graph.compile(checkpointer=checkpointer)
+
+
+async def close_travel_agent():
+    global _pool, travel_graph
+
+    if _pool is not None:
+        await _pool.close()
+
+    _pool = None
+    travel_graph = None
+
+
+async def run_travel_agent(user_input: str, thread_id: str | None = None):
+
+    if travel_graph is None:
+        await init_travel_agent()
 
     if not thread_id:
         thread_id = f"user_{uuid.uuid4().hex}"
@@ -198,7 +239,7 @@ def run_travel_agent(user_input: str, thread_id: str | None = None):
     }
 
 
-    result = travel_graph.invoke(
+    result = await travel_graph.ainvoke(
         {
             "messages":[
                 HumanMessage(content=user_input)
