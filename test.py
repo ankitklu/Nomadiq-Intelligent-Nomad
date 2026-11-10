@@ -4,7 +4,8 @@ from tools.tavily_tool import tavily_search
 from tools.flight_tool import search_flights
 from backend import run_travel_agent, close_travel_agent
 
-from mcp_client_test import get_all_tools, run_mcp_search
+# from mcp_client_test import get_all_tools
+from mcp_client import get_all_tools
 
 
 # async def main():
@@ -35,4 +36,6 @@ if __name__ == "__main__":
     # tavily_map
     # tavily_research
 
-    asyncio.run(run_mcp_search("Latest News on NVDIA CEO"))
+    # asyncio.run(run_mcp_search("Latest News on NVDIA CEO"))
+
+    asyncio.run(get_all_tools())
