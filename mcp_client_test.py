@@ -1,4 +1,5 @@
 import os
+import json
 import asyncio
 import certifi 
 from dotenv import load_dotenv
@@ -49,7 +50,7 @@ async def get_tavily_search_tool():
     return tavily_search_tool
 
 
-async def run_mcp_search(query: str):
+async def tavily_mcp_search(query: str):
     await get_tavily_search_tool()
 
     result = await tavily_search_tool.ainvoke(
@@ -57,7 +58,55 @@ async def run_mcp_search(query: str):
             "query": query
         }
     )
-    return result
+    return format_mcp_result(result)
+
+
+def format_mcp_result(result) -> str:
+    """
+    MCP tools return a list of content blocks, e.g.
+    [{"type": "text", "text": '{"results": [...]}'}].
+    Convert that into a plain, readable string.
+    """
+
+    if isinstance(result, str):
+        blocks = [result]
+    else:
+        blocks = [
+            b.get("text", "") if isinstance(b, dict) else str(b)
+            for b in result
+        ]
+
+    text = "\n".join(blocks).strip()
+
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return text
+
+    if isinstance(data, dict) and "error" in data:
+        detail = data.get("detail")
+        if isinstance(detail, dict):
+            detail = detail.get("error")
+        status = data.get("status", "unknown")
+        return f"Search failed (status {status}): {detail or data['error']}"
+
+    results = data.get("results", []) if isinstance(data, dict) else []
+    if not results:
+        return text
+
+    formatted = []
+
+    for i, r in enumerate(results, 1):
+        title = r.get("title", "N/A")
+        url = r.get("url", "N/A")
+        snippet = r.get("content") or r.get("snippet") or "N/A"
+
+        if len(snippet) > 300:
+            snippet = snippet[:300].rsplit(" ", 1)[0] + "..."
+
+        formatted.append(f"{i}. {title}\nURL: {url}\nSnippet: {snippet}\n")
+
+    return "\n\n".join(formatted)
     # print(result)
 
 

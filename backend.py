@@ -11,6 +11,9 @@ import asyncio
 import operator
 import uuid
 
+import nest_asyncio
+nest_asyncio.apply()
+
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
@@ -25,8 +28,9 @@ from langchain_core.messages import (
 )
 
 from langchain_groq import ChatGroq
-from tools.tavily_tool import tavily_search
+# from tools.tavily_tool import tavily_search
 from tools.flight_tool import search_flights
+from mcp_client_test import tavily_mcp_search
 
 def get_database_url():
 
@@ -94,7 +98,7 @@ async def flight_agent(state: TravelState):
 
 async def hotel_agent(state: TravelState):
     query = f"Best hotels for {state['user_query']}"
-    hotel_results = await tavily_search(query)
+    hotel_results = await tavily_mcp_search(query)
 
     return {
         "hotel_results": hotel_results,
