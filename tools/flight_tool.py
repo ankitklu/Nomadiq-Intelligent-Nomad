@@ -1,9 +1,10 @@
 import os 
 import re 
+import asyncio
 import certifi
 import airportsdata
 import pycountry
-import requests
+import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -466,7 +467,7 @@ Arrival:
 """.strip()
 
 
-def search_flights(query: str, limit: int = 10):
+async def search_flights(query: str, limit: int = 10):
     if not API_KEY:
         return (
             "Flight API error: AVIATIONSTACK_API_KEY is missing.\n"
@@ -474,7 +475,9 @@ def search_flights(query: str, limit: int = 10):
             "AVIATIONSTACK_API_KEY=your_api_key_here"
         )
 
-    dep_iata, arr_iata = parse_route(query)
+    # parse_route scans the whole airport database (CPU-bound), so run it in a
+    # worker thread to keep the event loop free.
+    dep_iata, arr_iata = await asyncio.to_thread(parse_route, query)
 
     params = {
         "access_key": API_KEY,
@@ -488,9 +491,10 @@ def search_flights(query: str, limit: int = 10):
         params["arr_iata"] = arr_iata
 
     try:
-        response = requests.get(BASE_URL, params=params, timeout=30)
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(BASE_URL, params=params)
         data = response.json()
-    except requests.exceptions.RequestException as e:
+    except httpx.HTTPError as e:
         return f"Flight API request failed: {e}"
     except ValueError:
         return "Flight API returned invalid JSON."
@@ -536,6 +540,9 @@ def search_flights(query: str, limit: int = 10):
 
 
 if __name__ == "__main__":
-    print(search_flights("Plan a 7 days Japan trip from Bangladesh"))
-    print("\n" + "=" * 80 + "\n")
-    print(search_flights("all country flight info"))
+    async def _main():
+        print(await search_flights("Plan a 7 days Japan trip from Bangladesh"))
+        print("\n" + "=" * 80 + "\n")
+        print(await search_flights("all country flight info"))
+
+    asyncio.run(_main())

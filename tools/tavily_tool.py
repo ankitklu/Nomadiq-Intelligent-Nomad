@@ -1,16 +1,16 @@
-from tavily import TavilyClient
+from tavily import AsyncTavilyClient
 import os
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-client = TavilyClient(
+client = AsyncTavilyClient(
     api_key=os.getenv("TAVILY_API_KEY")
 )
 
 
-def tavily_search(query: str):
+async def tavily_search(query: str):
     """
     Search for a location using the Tavily API.
 
@@ -18,7 +18,7 @@ def tavily_search(query: str):
         query (str): The search query (e.g., city name, airport code).
     """
 
-    response = client.search(
+    response = await client.search(
         query=query,
         max_results=5,  # You can adjust the number of results as needed
 
@@ -37,4 +37,3 @@ def tavily_search(query: str):
         results.append(f"{i}. {title}\nURL: {url}\nSnippet: {snippet}\n")
 
     return "\n\n".join(results)
-
