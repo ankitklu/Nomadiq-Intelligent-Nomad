@@ -235,14 +235,22 @@ async function downloadPdf(query, answer) {
 // Results
 // =========================
 
+// Backend fields should be strings, but MCP tools can hand back lists/objects
+function toText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map((v) => (v && v.text) ?? toText(v)).join("\n");
+    return JSON.stringify(value, null, 2);
+}
+
 function addResult(data, elapsedMs, query) {
     const node = cloneTpl(els.resultTpl);
 
     const sections = {
-        answer: { text: data.answer, render: renderMarkdown },
-        itinerary: { text: data.itinerary, render: renderMarkdown },
-        flights: { text: data.flight_results, render: renderRaw },
-        hotels: { text: data.hotel_results, render: renderRaw },
+        answer: { text: toText(data.answer), render: renderMarkdown },
+        itinerary: { text: toText(data.itinerary), render: renderMarkdown },
+        flights: { text: toText(data.flight_results), render: renderMarkdown },
+        hotels: { text: toText(data.hotel_results), render: renderRaw },
     };
 
     Object.entries(sections).forEach(([key, { text, render }]) => {
@@ -287,7 +295,7 @@ function addResult(data, elapsedMs, query) {
         pdfBtn.disabled = true;
         pdfLabel.textContent = "Preparing…";
         try {
-            await downloadPdf(query, data.answer || "");
+            await downloadPdf(query, sections.answer.text);
             pdfLabel.textContent = "Download PDF";
         } catch (err) {
             console.error(err);

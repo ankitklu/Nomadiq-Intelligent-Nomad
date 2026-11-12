@@ -1,3 +1,8 @@
+import warnings
+
+# Harmless warning raised inside the mcp package's own settings model on import
+warnings.filterwarnings("ignore", message="Field 'lifespan' has an incomplete definition")
+
 from mcp.server.fastmcp import FastMCP
 import requests
 import os
@@ -7,7 +12,7 @@ load_dotenv()
 
 mcp = FastMCP("Weather MCP Server")
 
-OPENWAETHER_API_KEY= os.getenv("OPENWAETHER_API_KEY")
+OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
 @mcp.tool()
 def get_current_weather(city: str):
@@ -16,7 +21,7 @@ def get_current_weather(city: str):
         "https://api.openweathermap.org/data/2.5/weather",
         params={
             "q": city,
-            "appid": OPENWAETHER_API_KEY,
+            "appid": OPENWEATHER_API_KEY,
             "units": "metric"
         }
     )
@@ -54,6 +59,9 @@ def get_forecast(city: str):
     )
 
     data = response.json()
+
+    if response.status_code != 200:
+        return data
 
     forecast = []
 
