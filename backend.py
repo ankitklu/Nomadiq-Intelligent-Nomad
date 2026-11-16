@@ -12,6 +12,8 @@ import json
 import operator
 import uuid
 
+from langraph.types import Command, interrupt
+
 from mcp_client import tavily_mcp_search, aviation_mcp_call, extract_destination, forecast_mcp_search, weather_mcp_search
 
 from psycopg.rows import dict_row
@@ -482,30 +484,54 @@ async def weather_agent(state: TravelState):
     }
 
 
+
 # ==========================
 # Itinerary Agent
 # =========================
 
-async def itinerary_agent(state: TravelState):
-    itinerary_prompt = f"""
-    Based on the following flight and hotel results, create a detailed travel itinerary for the user query '{state['user_query']}'.
+def itinerary_agent(state: TravelState):
+    prompt = f"""
+Create a complete travel itinerary.
 
-    Flight Results:
-    {state['flight_results']}
+User Query:
+{state['user_query']}
 
-    Hotel Results:
-    {state['hotel_results']}
-    """
+Trip Constraints:
+{state.get('trip_constraints', {})}
 
-    response = await llm.ainvoke([
-            SystemMessage(content="You are a expert travel planner."),
-            HumanMessage(content=itinerary_prompt)
-        ])
+Flight Results:
+{state.get('flight_results', '')}
+
+Hotel Results:
+{state.get('hotel_results', '')}
+
+Weather Results:
+{state.get('weather_results', '')}
+
+Budget Results:
+{state.get('budget_results', '')}
+
+Make the itinerary practical, budget-aware, and easy to follow.
+Create a clear draft that is ready for human review.
+"""
+
+    response = llm.invoke(
+        [
+            SystemMessage(content="You are an expert travel planner."),
+            HumanMessage(content=prompt),
+        ]
+    )
+
+    approval_request = (
+        "Please review the generated draft itinerary. Approve it to create the "
+        "final polished plan, or provide feedback for revision."
+    )
 
     return {
         "itinerary": response.content,
-        "messages": [response],
-        "llm_calls": state.get("llm_calls", 0) + 1
+        "approval_request": approval_request,
+        "messages": [AIMessage(content="Draft itinerary created for human review.")],
+        "llm_calls": state.get("llm_calls", 0) + 1,
     }
 
 
@@ -554,32 +580,78 @@ If exact live prices are unavailable, clearly label estimates as approximate.
     }
 
 
-
-# ==========================
-# Final Response Agent
 # =========================
+# Human-in-the-Loop approval
+# =========================
+def human_approval_agent(state: TravelState):
+    # Do not wrap interrupt() in try/except. LangGraph uses it to pause execution.
+    review = interrupt(
+        {
+            "question": "Do you approve this itinerary?",
+            "draft_itinerary": state.get("itinerary", ""),
+            "approval_request": state.get("approval_request", ""),
+            "selected_agents": state.get("selected_agents", []),
+            "supervisor_reasoning": state.get("supervisor_reasoning", ""),
+            "expected_response": {
+                "approved": True,
+                "feedback": "Optional revision feedback",
+            },
+        }
+    )
 
+    approved = bool(review.get("approved", False))
+    human_feedback = str(review.get("feedback", "")).strip()
+
+    return {
+        "approved": approved,
+        "human_feedback": human_feedback,
+        "messages": [AIMessage(content="Human approval step completed.")],
+    }
+
+
+
+# =========================
+# Final Response Agent - original format kept, HITL feedback added
+# =========================
 def final_agent(state: TravelState):
+    if state.get("approved", False):
+        review_instruction = (
+            "The user approved the draft. Preserve its decisions while polishing it."
+        )
+    else:
+        review_instruction = f"""
+The user requested a revision. Apply this feedback carefully:
+{state.get('human_feedback', '') or 'Improve the draft before finalizing it.'}
+"""
+
     final_prompt = f"""
 Generate the final travel response for the user.
+
+Human Review:
+{review_instruction}
 
 User Request:
 {state['user_query']}
 
+Supervisor Constraints:
+{state.get('trip_constraints', {})}
+
 Flights:
-{state['flight_results']}
+{state.get('flight_results', '')}
 
 Hotels:
-{state['hotel_results']}
+{state.get('hotel_results', '')}
 
 Weather:
-{state['weather_results']}
+{state.get('weather_results', '')}
 
-Itinerary:
-{state['itinerary']}
+Budget Analysis:
+{state.get('budget_results', '')}
+
+Draft Itinerary:
+{state.get('itinerary', '')}
 
 Format the final answer beautifully using these sections:
-
 1. Trip Summary
 2. Flight Information
 3. Hotel Suggestions
@@ -588,22 +660,27 @@ Format the final answer beautifully using these sections:
 6. Estimated Budget
 7. Final Recommendations
 
-
 Important:
 - Be clear and practical.
-- Mention that live flight API may not provide ticket prices if pricing is unavailable.
+- Mention that live flight APIs may not provide ticket prices when pricing is unavailable.
 - Include weather-based travel advice.
 - Keep the response useful for real travel planning.
+- Incorporate the human feedback when revision was requested.
 """
 
-    response = llm.invoke([
-        SystemMessage(content="You are a professional AI travel booking assistant."),
-        HumanMessage(content=final_prompt)
-    ])
+    response = llm.invoke(
+        [
+            SystemMessage(
+                content="You are a professional AI travel booking assistant."
+            ),
+            HumanMessage(content=final_prompt),
+        ]
+    )
 
     return {
+        "final_response": response.content,
         "messages": [response],
-        "llm_calls": state.get("llm_calls", 0) + 1
+        "llm_calls": state.get("llm_calls", 0) + 1,
     }
 
 # ==========================
